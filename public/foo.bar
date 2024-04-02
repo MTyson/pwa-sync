@@ -1,0 +1,57 @@
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js')
+      .then(registration => {
+        console.log('Service Worker registered', registration);
+        const taskChannel = new BroadcastChannel('task-channel');
+        taskChannel.onmessage = event => {
+          console.log("broadcast event: " + event.data);
+	  persistTask(event.data.data);
+          registration.sync.register('task-sync');
+        };
+
+        createDb();
+
+      })
+      .catch(err => console.error('Service Worker registration failed', err));
+  });
+}
+let db = null;
+createDb = function() {
+  let request = indexedDB.open("TaskDB", 1);
+  request.onupgradeneeded = function(event) {
+    db = event.target.result;
+    if (!db.objectStoreNames.contains("tasks")) {
+      let tasksObjectStore = db.createObjectStore("tasks", { autoIncrement: true });
+      //tasksObjectStore.createIndex("statusIndex", "status", { unique: false });
+    }
+  };
+  request.onsuccess = function(event) { db = event.target.result; };
+  request.onerror = function(event) { console.log("Error in db: " + event); };
+}
+
+persistTask = function(task){
+  let transaction = db.transaction("tasks", "readwrite");
+  let tasksObjectStore = transaction.objectStore("tasks");
+  let addRequest = tasksObjectStore.add(task);
+  addRequest.onsuccess = function(event){ console.log("Task added to DB"); };
+  addRequest.onerror = function(event) {  };
+}
+
+self.addEventListener('sync', async function(event) {
+	console.log("sync event");
+  if (event.tag == 'task-sync') {
+    let transaction = db.transaction("tasks", "readonly");
+    let tasksObjectStore = transaction.objectStore("tasks");
+    let cursorRequest = tasksObjectStore.openCursor();
+    cursorRequest.onsuccess = function(event) {
+      let cursor = event.target.result;
+      if (cursor) {
+        let task = cursor.value;
+        console.log("TASK FROM DB: " + task);
+        cursor.continue();
+      }
+    };
+  }
+});
+
